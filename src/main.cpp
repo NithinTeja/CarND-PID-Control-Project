@@ -2,6 +2,7 @@
 #include <uWS/uWS.h>
 #include <iostream>
 #include <string>
+#include <ctime>
 #include "json.hpp"
 #include "PID.h"
 
@@ -33,12 +34,25 @@ string hasData(string s) {
 int main() {
   uWS::Hub h;
 
-  PID pid;
+  PID pid, pid_th;
   /**
    * TODO: Initialize the pid variable.
    */
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, 
+  double init_Kp = 0.15;
+  double init_Ki = 0.001;
+  double init_Kd = 2.5;
+
+  double init_Kp_th = 0.15;
+  double init_Ki_th = 0.0005;
+  double init_Kd_th = 3;
+
+  double target_speed = 40;
+  double lap_total_cte = 0;
+  
+  pid.Init(init_Kp,init_Ki,init_Kd);
+  pid_th.Init(init_Kp_th, init_Ki_th, init_Kd_th);
+  h.onMessage([&pid,&pid_th,&target_speed,&lap_total_cte](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, 
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -56,21 +70,30 @@ int main() {
           double cte = std::stod(j[1]["cte"].get<string>());
           double speed = std::stod(j[1]["speed"].get<string>());
           double angle = std::stod(j[1]["steering_angle"].get<string>());
-          double steer_value;
+          double steer_value = 0;
+		  double throttle_value = 0.4;
           /**
            * TODO: Calculate steering value here, remember the steering value is
            *   [-1, 1].
            * NOTE: Feel free to play around with the throttle and speed.
            *   Maybe use another PID controller to control the speed!
            */
-          
-          // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value 
-                    << std::endl;
+		  lap_total_cte += fabs(cte);
 
+		  //Steering controller
+		  pid.UpdateError(cte);
+		  steer_value = pid.TotalError();
+
+		  //Throttle controller
+		  pid_th.UpdateError(speed - target_speed);
+		  throttle_value = pid_th.TotalError();
+          // DEBUG
+          std::cout << "CTE: " << cte << " Steering Value: " << steer_value << 
+                    "Throttle Value:" << throttle_value << std::endl;
+		  std::cout << "Total CTE :" << lap_total_cte << std::endl;
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
+          msgJson["throttle"] = throttle_value;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
@@ -94,7 +117,7 @@ int main() {
   });
 
   int port = 4567;
-  if (h.listen(port)) {
+  if (h.listen("127.0.0.1", port)) {
     std::cout << "Listening to port " << port << std::endl;
   } else {
     std::cerr << "Failed to listen to port" << std::endl;
